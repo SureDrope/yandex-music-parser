@@ -9,6 +9,9 @@ class Track extends Model
 {
     use HasFactory;
 
+    public $timestamps = false;
+
+    protected $guarded = [];
     public function artist()
     {
         return $this->belongsTo(Artist::class);

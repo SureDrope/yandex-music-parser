@@ -15,9 +15,14 @@ return new class extends Migration
     {
         Schema::create('tracks', function (Blueprint $table) {
             $table->unsignedInteger('id')->primary();
-            $table->unsignedInteger('artist_id')->nullable();
+            $table->unsignedInteger('artist_id');
             $table->string('name');
-            $table->unsignedSmallInteger('duration');
+            $table->unsignedInteger('duration_ms');
+
+            $table->foreign('artist_id')
+                ->references('id')
+                ->on('artists')->constrained()
+                ->onDelete('cascade');
         });
     }
 
