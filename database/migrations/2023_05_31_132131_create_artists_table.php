@@ -19,7 +19,6 @@ return new class extends Migration
             $table->unsignedInteger('subscribers');
             $table->unsignedInteger('monthly_listeners');
             $table->unsignedSmallInteger('albums_count');
-            $table->unsignedSmallInteger('tracks_count');
         });
     }
 

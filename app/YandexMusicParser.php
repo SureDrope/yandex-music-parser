@@ -102,15 +102,16 @@ class YandexMusicParser
             'subscribers' => $artist['likesCount'],
             'monthly_listeners' => $stats['lastMonthListeners'],
             'albums_count' => count($albums),
-            'tracks_count' => count($this->fetchedTracks),
         ];
     }
     private function saveArtist(): void
     {
         if (!$this->artistInDb) {
             Artist::create(
-                ['id' => $this->artistId],
-                $this->fetchedArtist
+                array_merge(
+                    ['id' => $this->artistId],
+                    $this->fetchedArtist
+                )
             );
         } else {
             $this->artistInDb->update($this->fetchedArtist);
@@ -121,9 +122,8 @@ class YandexMusicParser
         // If an artist already exists in the db, find whether
         // there are new tracks, update if true, else
         // insert new tracks
-        dd($this->artistInDb);
         if ($this->artistInDb) {
-            if ($this->artistInDb->tracks_count < count($this->fetchedTracks)) {
+            if ($this->artistInDb->tracks()->count() < count($this->fetchedTracks)) {
                 $existingTracks = $this->artistInDb
                     ->tracks()
                     ->whereIn('id', array_column($this->fetchedTracks, 'id'))
@@ -135,7 +135,6 @@ class YandexMusicParser
                 );
 
                 // Insert new tracks
-                dd($newTracks);
                 if (!empty($newTracks)) {
                     $this->artistInDb->tracks()->insert($newTracks);
                 }
