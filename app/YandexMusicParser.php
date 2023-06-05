@@ -5,20 +5,23 @@ namespace App;
 use Illuminate\Support\Facades\Http;
 use App\Utils\UrlHandler;
 use App\Models\Artist;
-use App\Models\Track;
 use \Exception;
 
 class YandexMusicParser
 {
-    private $artistId;
-    private $isArtistInDb = false;
+    const YANDEX_MUSIC_HOST = 'music.yandex.ru';
+    const YANDEX_MUSIC_API_URL =  'https://music.yandex.ru/handlers/artist.jsx';
+    const MAX_AMOUNT_OF_TRACKS_TO_FETCH = 1000000;
 
-    private $artist;
-    private $tracks;
+    private string $artistId;
+    private $artistInDb;
+
+    private array $fetchedArtist;
+    private array $fetchedTracks;
 
     public function __construct(string $url)
     {
-        if (!UrlHandler::compareHosts($url, 'music.yandex.ru')) {
+        if (!UrlHandler::compareHosts($url, self::YANDEX_MUSIC_HOST)) {
             throw new Exception('Invalid domain');
         };
 
@@ -30,29 +33,26 @@ class YandexMusicParser
             throw new Exception('No artist ID found in the URL');
         }
 
-        $isArtistInDb = Artist::where('id', $this->artistId)->first();
-        if ($isArtistInDb) $this->isArtistInDb = true;
+        $this->artistInDb = Artist::find($this->artistId);
 
-        $this->getData();
-        if (!$this->isArtistInDb) $this->saveArtist();
+        $this->fetchAndParseJson();
+
+        $this->saveArtist();
         $this->saveTracks();
     }
 
-    private function getData()
+    private function fetchAndParseJson()
     {
-        $jsonData = $this->fetchJson();
-        $this->parseJson($jsonData);
+        $data = $this->fetchJson();
+        $this->parseJson($data);
     }
-
     private function fetchJson()
     {
-        $yandexMusicUrl = 'https://music.yandex.ru/handlers/artist.jsx';
-
         $urlArguments = [
             'artist' => $this->artistId,
             'what' => 'tracks',
             'trackPage' => 0,
-            'trackPageSize' => 100
+            'trackPageSize' => self::MAX_AMOUNT_OF_TRACKS_TO_FETCH,
         ];
 
         $headers = [
@@ -74,20 +74,21 @@ class YandexMusicParser
             'sec-ch-ua-platform' => '"Windows"',
         ];
         try {
-            $response = Http::withHeaders($headers)->get($yandexMusicUrl, $urlArguments);
+            $response = Http::withHeaders($headers)
+                ->get(self::YANDEX_MUSIC_API_URL, $urlArguments);
         } catch (Exception $e) {
             throw new Exception('Error: ' . $e->getMessage());
         }
         return $response->json();
     }
 
-    private function parseJson(array $jsonData)
+    private function parseJson(array $data)
     {
-        $artistInfo = $jsonData['artist'];
-        $stats = $jsonData['stats'];
-        $albums = $jsonData['albums'];
-        $tracks = $jsonData['tracks'];
-        $this->tracks = array_map(function ($track) {
+        $artist = $data['artist'];
+        $stats = $data['stats'];
+        $albums = $data['albums'];
+        $tracks = $data['tracks'];
+        $this->fetchedTracks = array_map(function ($track) {
             return [
                 'id' => $track['id'],
                 'artist_id' => $this->artistId,
@@ -96,20 +97,51 @@ class YandexMusicParser
             ];
         }, $tracks);
 
-        $this->artist = [
-            'id' => $artistInfo['id'],
-            'name' => $artistInfo['name'],
-            'subscribers' => $artistInfo['likesCount'],
+        $this->fetchedArtist = [
+            'name' => $artist['name'],
+            'subscribers' => $artist['likesCount'],
             'monthly_listeners' => $stats['lastMonthListeners'],
-            'albums_count' => count($albums)
+            'albums_count' => count($albums),
+            'tracks_count' => count($this->fetchedTracks),
         ];
     }
-    private function saveArtist()
+    private function saveArtist(): void
     {
-        Artist::create($this->artist);
+        if (!$this->artistInDb) {
+            Artist::create(
+                ['id' => $this->artistId],
+                $this->fetchedArtist
+            );
+        } else {
+            $this->artistInDb->update($this->fetchedArtist);
+        }
     }
-    private function saveTracks()
+    private function saveTracks(): void
     {
-        Track::insert($this->tracks);
+        // If an artist already exists in the db, find whether
+        // there are new tracks, update if true, else
+        // insert new tracks
+        dd($this->artistInDb);
+        if ($this->artistInDb) {
+            if ($this->artistInDb->tracks_count < count($this->fetchedTracks)) {
+                $existingTracks = $this->artistInDb
+                    ->tracks()
+                    ->whereIn('id', array_column($this->fetchedTracks, 'id'))
+                    ->pluck('id')
+                    ->toArray();
+                $newTracks = array_filter(
+                    $this->fetchedTracks,
+                    fn ($track) => !in_array($track['id'], $existingTracks)
+                );
+
+                // Insert new tracks
+                dd($newTracks);
+                if (!empty($newTracks)) {
+                    $this->artistInDb->tracks()->insert($newTracks);
+                }
+            }
+        } else {
+            Artist::find($this->artistId)->tracks()->insert($this->fetchedTracks);
+        }
     }
 }
